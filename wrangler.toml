@@ -1,0 +1,17 @@
+name = "tradesense-api"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# KV namespace for caching Angel One auth token
+# After deploy, run: wrangler kv:namespace create TRADESENSE_KV
+# Then paste the ID below
+[[kv_namespaces]]
+binding = "TRADESENSE_KV"
+id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"
+
+# Secrets (set via: wrangler secret put SECRET_NAME)
+# Do NOT put real values here — use wrangler secret put
+# ANGEL_API_KEY      → your Angel One API key
+# ANGEL_CLIENT_ID    → your Angel One client ID  
+# ANGEL_PASSWORD     → your Angel One password
+# ANGEL_TOTP_SECRET  → your TOTP secret from Angel One app
