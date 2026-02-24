@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>TradeSense Pro v5</title>
+<title>TradeSense Pro</title>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@700;900&display=swap" rel="stylesheet"/>
 <style>
 :root{
@@ -194,7 +194,7 @@ header{display:flex;align-items:center;gap:14px;margin-bottom:32px;}
     <div class="logo">📡</div>
     <div>
       <div class="hdr-h1">TRADESENSE PRO</div>
-      <div class="hdr-sub">Multi-Stock Intelligence Engine · v5.0</div>
+      <div class="hdr-sub">Multi-Stock Intelligence Engine · v6.0</div>
     </div>
     <div class="live-badge"><div class="live-dot"></div>&nbsp;LIVE</div>
   </header>
@@ -217,6 +217,26 @@ header{display:flex;align-items:center;gap:14px;margin-bottom:32px;}
     </div>
 
     <div id="error-banner" class="error-banner"></div>
+
+    <!-- MANUAL OVERRIDE (shown when fetch fails) -->
+    <div id="manual-override" style="display:none;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+      <div class="field">
+        <label>Price (CMP) — Manual</label>
+        <input type="number" id="manual-price" placeholder="e.g. 25704" step="0.5" oninput="applyManual()"/>
+      </div>
+      <div class="field">
+        <label>VWAP — Manual</label>
+        <input type="number" id="manual-vwap" placeholder="From your chart" step="0.5" oninput="applyManual()"/>
+      </div>
+      <div class="field">
+        <label>RSI (14) — Manual</label>
+        <input type="number" id="manual-rsi" placeholder="0–100" min="0" max="100" oninput="applyManual()"/>
+      </div>
+      <div class="field">
+        <label>India VIX — Manual</label>
+        <input type="number" id="manual-vix" placeholder="From nseindia.com" step="0.1" oninput="applyManual()"/>
+      </div>
+    </div>
 
     <div class="fetch-status-row" id="fetch-row" style="display:none">
       <div class="fetch-item" id="fi-price">
@@ -367,15 +387,15 @@ header{display:flex;align-items:center;gap:14px;margin-bottom:32px;}
 ═══════════════════════════════════════════ */
 const STOCKS = [
   // INDICES
-  { name:'Nifty 50',        ticker:'^NSEI',      display:'NIFTY 50',    exchange:'NSE INDEX' },
-  { name:'Bank Nifty',      ticker:'^NSEBANK',   display:'BANKNIFTY',   exchange:'NSE INDEX' },
+  { name:'Nifty 50',        ticker:'^NSEI',      angelSymbol:'NIFTY',      display:'NIFTY 50',    exchange:'NSE INDEX' },
+  { name:'Bank Nifty',      ticker:'^NSEBANK',   angelSymbol:'BANKNIFTY',   display:'BANKNIFTY',   exchange:'NSE INDEX' },
   { name:'Nifty IT',        ticker:'^CNXIT',     display:'NIFTY IT',    exchange:'NSE INDEX' },
   { name:'Nifty Midcap',    ticker:'^NSEMDCP50', display:'NIFTY MID50', exchange:'NSE INDEX' },
   { name:'Sensex',          ticker:'^BSESN',     display:'SENSEX',      exchange:'BSE INDEX' },
   { name:'India VIX',       ticker:'^INDIAVIX',  display:'INDIA VIX',   exchange:'NSE INDEX' },
   // LARGE CAP
-  { name:'Reliance Industries', ticker:'RELIANCE.NS', display:'RELIANCE',  exchange:'NSE' },
-  { name:'TCS',                 ticker:'TCS.NS',       display:'TCS',       exchange:'NSE' },
+  { name:'Reliance Industries', ticker:'RELIANCE.NS', angelSymbol:'RELIANCE', display:'RELIANCE',  exchange:'NSE' },
+  { name:'TCS',                 ticker:'TCS.NS',       angelSymbol:'TCS',       display:'TCS',       exchange:'NSE' },
   { name:'Infosys',             ticker:'INFY.NS',      display:'INFY',      exchange:'NSE' },
   { name:'HDFC Bank',           ticker:'HDFCBANK.NS',  display:'HDFCBANK',  exchange:'NSE' },
   { name:'ICICI Bank',          ticker:'ICICIBANK.NS', display:'ICICIBANK', exchange:'NSE' },
@@ -520,23 +540,20 @@ function clearStock() {
   hideError();
 }
 
-/* ═══ CORS PROXY FETCH ═══ */
-async function proxyFetch(url) {
-  const proxies = [
-    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-    u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-    u => `https://thingproxy.freeboard.io/fetch/${u}`,
-  ];
-  for (const proxy of proxies) {
-    try {
-      const res = await fetch(proxy(url), { signal: AbortSignal.timeout(8000) });
-      if (res.ok) return res;
-    } catch {}
-  }
-  throw new Error('All proxies failed. Try refreshing or enter data manually.');
+/* ═══ WORKER API — your Cloudflare backend ═══
+   Replace WORKER_URL with your deployed worker URL
+   e.g. https://tradesense-api.YOUR-NAME.workers.dev
+═══════════════════════════════════════════════════ */
+const WORKER_URL = 'https://tradesense-api.YOUR-NAME.workers.dev';
+
+async function workerFetch(path) {
+  const res = await fetch(`${WORKER_URL}${path}`);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error || 'API error');
+  return data.data;
 }
 
-/* ═══ FETCH LIVE DATA ═══ */
+/* ═══ FETCH LIVE DATA via Cloudflare Worker ═══ */
 async function fetchData() {
   if (!selectedStock) return;
   const btn = document.getElementById('btn-fetch');
@@ -544,8 +561,8 @@ async function fetchData() {
   btn.disabled = true;
   icon.innerHTML = '<span class="spin">⟳</span>';
   hideError();
+  showInfo('⚡ Fetching live data from Angel One…');
 
-  // Reset shimmer
   ['price','vwap','rsi','vix'].forEach(k => {
     document.getElementById(`fv-${k}`).innerHTML = '<div class="shimmer"></div>';
     document.getElementById(`fs-${k}`).textContent = '—';
@@ -553,70 +570,40 @@ async function fetchData() {
   });
 
   try {
-    const stockUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${selectedStock.ticker}?interval=10m&range=1d`;
-    const vixUrl   = `https://query1.finance.yahoo.com/v8/finance/chart/%5EINDIAVIX?interval=1d&range=1d`;
+    if (WORKER_URL.includes('YOUR-NAME')) throw new Error('⚙️ Worker URL not set — enter data manually below, or deploy the worker first.');
 
-    // Fetch stock + VIX in parallel (skip VIX fetch if stock IS VIX)
-    const isVix = selectedStock.ticker === '^INDIAVIX';
-    const [stockRes, vixRes] = await Promise.all([
-      proxyFetch(stockUrl),
-      isVix ? Promise.resolve(null) : proxyFetch(vixUrl)
+    const sym  = selectedStock.angelSymbol || selectedStock.display.replace(/\.NS|\.BO/g, '');
+    const exch = selectedStock.exchange === 'BSE INDEX' ? 'BSE' : 'NSE';
+
+    const [quote, candles, vixData] = await Promise.all([
+      workerFetch(`/quote?symbol=${encodeURIComponent(sym)}&exchange=${exch}`),
+      workerFetch(`/candles?symbol=${encodeURIComponent(sym)}&exchange=${exch}&interval=TEN_MINUTE`),
+      workerFetch('/vix'),
     ]);
 
-    const stockJson = await stockRes.json();
-    const chart = stockJson.chart.result[0];
-    const meta  = chart.meta;
-    const q     = chart.indicators.quote[0];
+    const price     = quote.price;
+    const prevClose = quote.prevClose;
+    const vwap      = candles.vwap;
+    const rsi       = candles.rsi;
+    const vix       = vixData.vix;
 
-    const closes  = q.close  || [];
-    const highs   = q.high   || [];
-    const lows    = q.low    || [];
-    const volumes = q.volume || [];
-
-    const validCloses = closes.filter(Boolean);
-    const price = meta.regularMarketPrice || validCloses.at(-1);
-    const prevClose = meta.previousClose || meta.chartPreviousClose;
-
-    // VWAP
-    let cumTPV = 0, cumVol = 0;
-    for (let i = 0; i < closes.length; i++) {
-      if (!closes[i] || !volumes[i]) continue;
-      const tp = ((closes[i]) + (highs[i] || closes[i]) + (lows[i] || closes[i])) / 3;
-      cumTPV += tp * volumes[i];
-      cumVol += volumes[i];
-    }
-    const vwap = cumVol > 0 ? cumTPV / cumVol : price;
-
-    // RSI 14
-    const rsi = calcRSI(validCloses, 14);
-
-    // VIX
-    let vix = 0;
-    if (isVix) {
-      vix = price;
-    } else {
-      const vixJson = await vixRes.json();
-      vix = vixJson.chart.result[0].meta.regularMarketPrice;
-    }
-
-    // Store
     live.price = price; live.vwap = vwap; live.rsi = rsi; live.vix = vix;
     live.stockName = selectedStock.name; live.ticker = selectedStock.display;
 
-    // Auto-fill prev close
     if (prevClose && !document.getElementById('prev').value)
       document.getElementById('prev').value = prevClose.toFixed(2);
 
-    // Update UI
-    setFI('price', price.toFixed(2),  price >= prevClose ? `▲ vs ₹${prevClose?.toFixed(2)}` : `▼ vs ₹${prevClose?.toFixed(2)}`, price >= prevClose ? 'green':'red');
+    const chg = price >= prevClose;
+    setFI('price', price.toFixed(2),  `${chg?'▲':'▼'} vs ₹${prevClose?.toFixed(2)} (${quote.changePct?.toFixed(2)}%)`, chg?'green':'red');
     setFI('vwap',  vwap.toFixed(2),   price > vwap ? `${(price-vwap).toFixed(1)} above VWAP` : `${(vwap-price).toFixed(1)} below VWAP`, price >= vwap ? 'green':'red');
     setFI('rsi',   rsi.toFixed(1),    rsi>55?'Bullish zone':rsi<45?'Bearish zone':'Neutral zone', rsi>55?'green':rsi<45?'red':'');
-    setFI('vix',   vix.toFixed(2),    vix>20?'Elevated ⚠️':'Calm ✓', vix>20?'red':'green');
+    setFI('vix',   vix.toFixed(2),    `${vixData.changePct>=0?'▲':'▼'} ${Math.abs(vixData.changePct).toFixed(2)}% · ${vix>20?'Elevated ⚠️':'Calm ✓'}`, vix>20?'red':'green');
 
-    document.getElementById('fetch-time').textContent = `Fetched: ${new Date().toLocaleTimeString('en-IN')} · ${selectedStock.name}`;
+    document.getElementById('fetch-time').textContent = `Live · ${new Date().toLocaleTimeString('en-IN')} · ${selectedStock.name}`;
+    hideError();
 
   } catch(e) {
-    showError(`⚠️ ${e.message}\n\nEnter values manually from your chart. Price & RSI from your charting app, VIX from nseindia.com`);
+    showError(`⚠️ ${e.message}\n\nUse manual inputs below to enter data from your chart.`);
     ['price','vwap','rsi','vix'].forEach(k => {
       document.getElementById(`fv-${k}`).textContent = '—';
       document.getElementById(`fi-${k}`).className = 'fetch-item error';
@@ -653,10 +640,25 @@ function calcRSI(closes, period) {
 
 function showError(msg) {
   const b = document.getElementById('error-banner');
-  b.style.display = 'block'; b.textContent = msg;
+  b.style.display = 'block';
+  b.style.color = 'var(--bear)';
+  b.style.borderColor = 'rgba(255,61,107,.3)';
+  b.style.background = 'rgba(255,61,107,.08)';
+  b.textContent = msg;
+  // Show manual input override section on error
+  document.getElementById('manual-override').style.display = 'grid';
+}
+function showInfo(msg) {
+  const b = document.getElementById('error-banner');
+  b.style.display = 'block';
+  b.style.color = 'var(--accent)';
+  b.style.borderColor = 'rgba(0,245,196,.3)';
+  b.style.background = 'rgba(0,245,196,.05)';
+  b.textContent = msg;
 }
 function hideError() {
   document.getElementById('error-banner').style.display = 'none';
+  document.getElementById('manual-override').style.display = 'none';
 }
 
 /* ═══ CHIP TOGGLE ═══ */
@@ -858,6 +860,24 @@ function fallback(d) {
 India VIX at ${d.vix?.toFixed(1)} is ${d.vix > 20 ? 'elevated — options premiums are rich, consider spreads to reduce cost' : 'calm — straightforward option buying is viable'}.
 
 Net edge of ${d.diff > 0 ? '+' : ''}${d.diff?.toFixed(1)} delivers a ${d.confText?.toLowerCase()} ${d.direction?.toLowerCase()} signal. ${Math.abs(d.diff) >= 6 ? 'Multiple factors align cleanly — quality setup, trade with defined risk.' : Math.abs(d.diff) >= 3 ? 'Setup is decent but not perfect — size down and keep stops firm.' : 'Too many conflicting signals — stay sidelined for cleaner confluence.'}`;
+}
+
+/* ═══ APPLY MANUAL OVERRIDE ═══ */
+function applyManual() {
+  const p   = parseFloat(document.getElementById('manual-price').value);
+  const v   = parseFloat(document.getElementById('manual-vwap').value);
+  const r   = parseFloat(document.getElementById('manual-rsi').value);
+  const vix = parseFloat(document.getElementById('manual-vix').value);
+  if (p)   { live.price = p; setFI('price', p.toFixed(2), 'Manual entry', p >= (live.price||p) ? 'green' : 'red'); }
+  if (v)   { live.vwap  = v; setFI('vwap',  v.toFixed(2), 'Manual entry', ''); }
+  if (r)   { live.rsi   = r; setFI('rsi',   r.toFixed(1), r>55?'Bullish zone':r<45?'Bearish zone':'Neutral zone', r>55?'green':r<45?'red':''); }
+  if (vix) { live.vix   = vix; setFI('vix', vix.toFixed(2), vix>20?'Elevated ⚠️':'Calm ✓', vix>20?'red':'green'); }
+  // Show the fetch row if hidden
+  document.getElementById('fetch-row').style.display = 'grid';
+  if (selectedStock) {
+    live.stockName = selectedStock.name;
+    live.ticker    = selectedStock.display;
+  }
 }
 
 function buildTips(dir, vix, rsi, diff, price, strike, optType) {
